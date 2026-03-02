@@ -1,65 +1,45 @@
 # kyn - The Ultimate SaaS Starter Kit
 
-A production-ready starter kit for building architecture-focused applications with Next.js, Supabase, GitHub OAuth, and Vercel.
+A production-ready starter kit for building architecture-focused applications.
 
-## 🚀 Features
-- **VETR Loop**: Advanced self-debugging AI generation loop (requires Grok API).
-- **GitHub OAuth**: Secure, encrypted token storage with auto-refresh.
-- **Supabase Integration**: Auth, Database (Postgres), and Storage.
-- **Vercel Deployment**: One-click deployment triggers via webhooks.
-- **Security**: AES-256 token encryption, JWT validation, and CSRF protection.
+## 🚀 Two-Tier Security Architecture
+
+This template uses a two-tier secret management system:
+
+1.  **Platform Level (Environment Variables)**:
+    *   Used by the platform owner to manage the infrastructure (Supabase DB, GitHub OAuth App).
+    *   Configured via `.env` using `process.env` placeholders.
+2.  **User Level (Encrypted Database)**:
+    *   Used by individual developers (users) to store their own app secrets (Supabase, Grok, Vercel).
+    *   Encrypted with AES-256 using a master `ENCRYPTION_KEY` before storage.
+    *   Fetched and decrypted on-the-fly per request.
 
 ---
 
-## 🛠️ Setup Guide
+## 🛠️ Platform Setup Guide (For Owners)
 
-This project is a template. You must provide your own environment variables to make it functional.
+1.  **Supabase (Platform DB)**:
+    *   Create a project at [supabase.com](https://supabase.com).
+    *   Set `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, and `JWT_SECRET` in `.env`.
+    *   Run the SQL schema provided below in the SQL Editor.
+2.  **GitHub OAuth (Platform App)**:
+    *   Create an OAuth App in GitHub Developer Settings.
+    *   Set `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` in `.env`.
+    *   Callback URL: `https://your-app.run.app/api/github/callback`.
+3.  **Security**:
+    *   Generate a 32-byte hex key for `ENCRYPTION_KEY`.
+    *   Set `APP_URL` to your deployment origin.
 
-### 1. Supabase Setup
-1. Create a new project at [supabase.com](https://supabase.com).
-2. Go to **Project Settings** -> **API**.
-3. Copy your **Project URL** (`SUPABASE_URL`), **anon public** key (`SUPABASE_ANON_KEY`), and **service_role** key (`SUPABASE_SERVICE_ROLE_KEY`).
-4. Copy your **JWT Secret** (`JWT_SECRET`) from the same page.
-5. Run the SQL schema provided in the "Database Schema" section below in the **SQL Editor**.
+---
 
-### 2. GitHub OAuth Setup
-1. Go to your [GitHub Developer Settings](https://github.com/settings/developers).
-2. Click **New OAuth App**.
-3. **Homepage URL**: Your app's URL (e.g., `https://your-app.run.app`).
-4. **Authorization callback URL**: `https://your-app.run.app/api/github/callback`.
-5. Click **Register application**.
-6. Copy your **Client ID** (`GITHUB_CLIENT_ID`) and generate a **Client Secret** (`GITHUB_CLIENT_SECRET`).
-7. **Important**: These keys are set in the environment variables. Users will connect their GitHub accounts via a one-time OAuth flow in the app.
+## 🛠️ User Setup Guide (For Developers)
 
-### 3. Vercel Deploy Hook
-1. Push your code to a GitHub repository.
-2. Import the project into [Vercel](https://vercel.com).
-3. Go to **Settings** -> **Git**.
-4. Under **Deploy Hooks**, create a new hook (e.g., name it "kyn-deploy").
-5. Copy the generated URL (`VERCEL_DEPLOY_HOOK`).
-
-### 4. Environment Variables
-Create a `.env` file in the root directory and fill in the following using placeholders from `.env.example`:
-
-```env
-# Supabase
-SUPABASE_URL="https://your-project.supabase.co"
-SUPABASE_ANON_KEY="your-anon-key"
-SUPABASE_SERVICE_ROLE_KEY="your-service-role-key"
-JWT_SECRET="your-jwt-secret"
-
-# GitHub OAuth
-GITHUB_CLIENT_ID="your-github-client-id"
-GITHUB_CLIENT_SECRET="your-github-client-secret"
-
-# Security
-# Generate a 32-byte hex key: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-ENCRYPTION_KEY="your-32-byte-hex-key"
-
-# App Configuration
-APP_URL="https://your-app.run.app"
-GROK_KEY="your-grok-api-key"
-```
+1.  **Connect GitHub**: Click "Connect GitHub" in the Onboarding tab. This is a one-time authorization.
+2.  **Configure Secrets**: Go to the **Secrets** tab and provide your own:
+    *   **Supabase**: Project URL, Anon Key, Service Role, JWT Secret.
+    *   **AI**: Grok API Key.
+    *   **Vercel**: Deploy Hook URL.
+3.  **Build**: Once secrets are saved, you can use the Wizard to generate and deploy apps.
 
 ---
 
@@ -94,6 +74,7 @@ create table user_platform_keys (
   id uuid primary key default uuid_generate_v4(),
   user_id uuid references auth.users(id) not null,
   encrypted_data text not null,
+  user_encryption_key text not null,
   created_at timestamptz default now(),
   unique(user_id)
 );

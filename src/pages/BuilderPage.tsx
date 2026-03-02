@@ -79,6 +79,7 @@ export default function BuilderPage() {
     supabaseAnonKey: '',
     supabaseServiceKey: '',
     supabaseJwtSecret: '',
+    grokKey: '',
     vercelDeployHook: '',
     encryptionKey: ''
   });
@@ -220,7 +221,10 @@ export default function BuilderPage() {
       const res = await fetch('/api/onboarding/keys', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ encrypted_data: encrypted })
+        body: JSON.stringify({ 
+          encrypted_data: encrypted,
+          user_encryption_key: finalEncryptionKey
+        })
       });
 
       if (!res.ok) throw new Error('Failed to save keys');
@@ -725,6 +729,24 @@ export default function BuilderPage() {
                                         tooltip="Find this in Supabase Dashboard → Settings → API → JWT Secret"
                                       />
                                     </div>
+                                  </div>
+
+                                  {/* AI Services Section */}
+                                  <div className="space-y-4">
+                                    <div className="flex items-center gap-2 text-[#858585] font-bold uppercase tracking-wider text-[10px]">
+                                      <Wand2 size={12} />
+                                      <span>AI Services</span>
+                                    </div>
+                                    <SecretInput 
+                                      label="Grok API Key"
+                                      value={secrets.grokKey}
+                                      onChange={(v) => setSecrets(p => ({ ...p, grokKey: v }))}
+                                      placeholder="xai-..."
+                                      type="password"
+                                      show={showSecrets.grokKey}
+                                      onToggle={() => setShowSecrets(p => ({ ...p, grokKey: !p.grokKey }))}
+                                      tooltip="Find this in console.x.ai"
+                                    />
                                   </div>
 
                                   {/* Vercel Section */}

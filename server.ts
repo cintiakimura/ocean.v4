@@ -7,6 +7,7 @@ import jwt from 'jsonwebtoken';
 import dotenv from 'dotenv';
 import path from 'path';
 import crypto from 'crypto';
+import CryptoJS from 'crypto-js';
 import { fileURLToPath } from 'url';
 
 dotenv.config();
@@ -21,22 +22,22 @@ const requiredEnvVars = [
   'GITHUB_CLIENT_SECRET',
   'ENCRYPTION_KEY',
   'APP_URL',
-  'GROK_KEY'
+  'VERCEL_DEPLOY_HOOK'
 ];
 
 const missingEnvVars = requiredEnvVars.filter(v => !process.env[v]);
 if (missingEnvVars.length > 0) {
-  console.warn('⚠️ WARNING: Missing environment variables:', missingEnvVars.join(', '));
-  console.warn('The application may not function correctly until these are set in .env');
+  console.error('CRITICAL: Missing environment variables:', missingEnvVars.join(', '));
+  process.exit(1);
 }
 
 // --- Encryption Utils ---
-const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || ''; 
+const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY; 
 const IV_LENGTH = 16;
 
 function encrypt(text: string) {
-  if (!ENCRYPTION_KEY || ENCRYPTION_KEY.length !== 64) {
-    throw new Error('Missing or invalid ENCRYPTION_KEY (must be 32-byte hex string)');
+  if (!ENCRYPTION_KEY) {
+    throw new Error('Missing or invalid ENCRYPTION_KEY—add it to .env');
   }
   const iv = crypto.randomBytes(IV_LENGTH);
   const cipher = crypto.createCipheriv('aes-256-cbc', Buffer.from(ENCRYPTION_KEY, 'hex'), iv);
@@ -46,8 +47,8 @@ function encrypt(text: string) {
 }
 
 function decrypt(text: string) {
-  if (!ENCRYPTION_KEY || ENCRYPTION_KEY.length !== 64) {
-    throw new Error('Missing or invalid ENCRYPTION_KEY (must be 32-byte hex string)');
+  if (!ENCRYPTION_KEY) {
+    throw new Error('Missing or invalid ENCRYPTION_KEY—add it to .env');
   }
   const textParts = text.split(':');
   const iv = Buffer.from(textParts.shift()!, 'hex');
@@ -58,6 +59,28 @@ function decrypt(text: string) {
   return decrypted.toString();
 }
 
+// --- User Secrets Utils ---
+async function getUserSecrets(userId: string) {
+  const { data, error } = await supabase
+    .from('user_platform_keys')
+    .select('encrypted_data, user_encryption_key')
+    .eq('user_id', userId)
+    .single();
+
+  if (error || !data) {
+    throw new Error('Setup incomplete—go to Secrets tab NOW.');
+  }
+
+  try {
+    const userEncryptionKey = decrypt(data.user_encryption_key);
+    const bytes = CryptoJS.AES.decrypt(data.encrypted_data, userEncryptionKey);
+    const decrypted = bytes.toString(CryptoJS.enc.Utf8);
+    return JSON.parse(decrypted);
+  } catch (e) {
+    throw new Error('Failed to decrypt secrets. Please re-configure in Secrets tab.');
+  }
+}
+
 // --- GitHub Utils ---
 async function getValidGitHubToken(userId: string) {
   const { data, error } = await supabase
@@ -66,7 +89,7 @@ async function getValidGitHubToken(userId: string) {
     .eq('user_id', userId)
     .single();
 
-  if (error || !data) throw new Error('GitHub not connected');
+  if (error || !data) throw new Error('GitHub not connected—go to Onboarding.');
 
   const accessToken = decrypt(data.access_token);
   const refreshToken = data.refresh_token ? decrypt(data.refresh_token) : null;
@@ -74,6 +97,10 @@ async function getValidGitHubToken(userId: string) {
 
   // If token is expired (or expires in less than 5 mins) and we have a refresh token, refresh it
   if (expiresAt && expiresAt.getTime() - Date.now() < 5 * 60 * 1000 && refreshToken) {
+    if (!process.env.GITHUB_CLIENT_ID || !process.env.GITHUB_CLIENT_SECRET) {
+      throw new Error('Platform GitHub App not configured.');
+    }
+
     const response = await fetch('https://github.com/login/oauth/access_token', {
       method: 'POST',
       headers: {
@@ -91,7 +118,6 @@ async function getValidGitHubToken(userId: string) {
     const tokenData = await response.json();
     if (tokenData.error) {
       console.error('GitHub token refresh failed:', tokenData.error_description);
-      // If refresh fails, we might need to re-auth
       throw new Error('GitHub session expired. Please reconnect.');
     }
 
@@ -121,9 +147,9 @@ const app = express();
 const PORT = 3000;
 
 // Supabase Client (Service Role for admin tasks)
-const supabaseUrl = process.env.SUPABASE_URL || '';
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const supabase = createClient(supabaseUrl!, supabaseServiceKey!);
 
 app.use(express.json({ limit: '100mb' }));
 app.use(cookieParser());
@@ -258,13 +284,15 @@ Prioritize correctness over speed.`;
 // 2. Generate: Wizard -> Grok prompt -> code
 app.post('/api/generate', authenticateToken, async (req: any, res: any) => {
   const { specs } = req.body;
-  const apiKey = process.env.GROK_KEY;
-
-  if (!apiKey) {
-    return res.status(500).json({ error: 'Missing GROK_KEY in environment' });
-  }
-
+  
   try {
+    const userSecrets = await getUserSecrets(req.user.sub);
+    const grokKey = userSecrets.grokKey;
+
+    if (!grokKey) {
+      return res.status(400).json({ error: 'Missing Grok API Key—go to Secrets tab.' });
+    }
+
     // Log request
     await supabase.from('logs').insert({
       user_id: req.user.sub,
@@ -272,27 +300,29 @@ app.post('/api/generate', authenticateToken, async (req: any, res: any) => {
       metadata: { specs }
     });
 
-    // ... (VETR loop logic remains same but uses process.env.GROK_KEY)
+    // ... (VETR loop logic uses grokKey)
     res.json({ message: 'Generation started (Placeholder for full VETR logic)' });
-  } catch (error) {
-    res.status(500).json({ error: 'Generation failed' });
+  } catch (error: any) {
+    res.status(error.message.includes('Setup incomplete') ? 400 : 500).json({ error: error.message });
   }
 });
 
 // 4. Deploy: Vercel webhook trigger
 app.post('/api/deploy', authenticateToken, async (req: any, res: any) => {
-  const { appId } = req.body;
-  const deployHook = process.env.VERCEL_DEPLOY_HOOK;
-  
-  if (!deployHook) return res.status(500).json({ error: 'Missing VERCEL_DEPLOY_HOOK in environment' });
-
   try {
+    const userSecrets = await getUserSecrets(req.user.sub);
+    const deployHook = userSecrets.vercelDeployHook;
+    
+    if (!deployHook) {
+      return res.status(400).json({ error: 'Missing Vercel Deploy Hook—go to Secrets tab.' });
+    }
+
     const response = await fetch(deployHook, { method: 'POST' });
     if (!response.ok) throw new Error('Vercel deploy failed');
     
     res.json({ status: 'triggered', message: 'Deployment started' });
-  } catch (error) {
-    res.status(500).json({ error: 'Deployment failed' });
+  } catch (error: any) {
+    res.status(error.message.includes('Setup incomplete') ? 400 : 500).json({ error: error.message });
   }
 });
 
@@ -389,10 +419,10 @@ app.get('/api/github/callback', async (req: any, res: any) => {
 
 // 9. Users: Save Platform Keys (Encrypted)
 app.post('/api/onboarding/keys', authenticateToken, async (req: any, res: any) => {
-  const { encrypted_data } = req.body;
+  const { encrypted_data, user_encryption_key } = req.body;
   
-  if (!encrypted_data) {
-    return res.status(400).json({ error: 'encrypted_data is required' });
+  if (!encrypted_data || !user_encryption_key) {
+    return res.status(400).json({ error: 'encrypted_data and user_encryption_key are required' });
   }
 
   try {
@@ -401,6 +431,7 @@ app.post('/api/onboarding/keys', authenticateToken, async (req: any, res: any) =
       .upsert({
         user_id: req.user.sub,
         encrypted_data: encrypted_data,
+        user_encryption_key: encrypt(user_encryption_key),
         created_at: new Date().toISOString()
       }, { onConflict: 'user_id' });
 
