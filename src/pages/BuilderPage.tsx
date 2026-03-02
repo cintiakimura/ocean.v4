@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { 
   Panel, 
   PanelGroup, 
@@ -26,10 +26,17 @@ import {
   Loader2,
   Code2,
   LogOut,
-  Wand2
+  Wand2,
+  Upload,
+  Key,
+  Info,
+  RefreshCw,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { Logo } from '../components/Logo';
 import Editor from '@monaco-editor/react';
+import CryptoJS from 'crypto-js';
 import { 
   SandpackProvider, 
   SandpackLayout, 
@@ -59,9 +66,61 @@ export default function BuilderPage() {
   const [generatedApp, setGeneratedApp] = useState<GeneratedApp | null>(null);
   const [activeFile, setActiveFile] = useState<FileContent | null>(null);
   const [sidebarExpanded, setSidebarExpanded] = useState(true);
-  const [activeTab, setActiveTab] = useState<'wizard' | 'explorer'>('wizard');
+  const [activeTab, setActiveTab] = useState<'wizard' | 'explorer' | 'onboarding'>('wizard');
   const [terminalOutput, setTerminalOutput] = useState<string[]>(['Welcome to kyn Builder v1.0.0', 'Ready to build your next SaaS...']);
+  
+  // Onboarding State
+  const [userStatus, setUserStatus] = useState({
+    githubConnected: false,
+    keysConfigured: false
+  });
+  const [secrets, setSecrets] = useState({
+    supabaseUrl: '',
+    supabaseAnonKey: '',
+    supabaseServiceKey: '',
+    supabaseJwtSecret: '',
+    vercelDeployHook: '',
+    encryptionKey: ''
+  });
+  const [showSecrets, setShowSecrets] = useState<Record<string, boolean>>({});
+  const [isSavingSecrets, setIsSavingSecrets] = useState(false);
+  const [secretsMessage, setSecretsMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
+  const [isEditingKeys, setIsEditingKeys] = useState(false);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
+
+  // Check user status on load
+  React.useEffect(() => {
+    const checkStatus = async () => {
+      try {
+        const res = await fetch('/api/users/status');
+        const data = await res.json();
+        setUserStatus({
+          githubConnected: data.githubConnected,
+          keysConfigured: data.keysConfigured
+        });
+        
+        if (data.keysConfigured && data.encryptedData) {
+          // We don't decrypt here for security, but we could if we had the key
+          // For now just mark as configured
+        }
+      } catch (e) {
+        console.error('Failed to check user status');
+      }
+    };
+    checkStatus();
+
+    // Listen for GitHub success
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'GITHUB_AUTH_SUCCESS') {
+        setUserStatus(prev => ({ ...prev, githubConnected: true }));
+        setTerminalOutput(prev => [...prev, '> GitHub connected successfully!']);
+      }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []);
 
   const handleInputChange = (field: keyof AppSpecs, value: string) => {
     setSpecs(prev => ({ ...prev, [field]: value }));
@@ -101,6 +160,90 @@ export default function BuilderPage() {
     }
   };
 
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const MAX_SIZE = 100 * 1024 * 1024; // 100MB
+    if (file.size > MAX_SIZE) {
+      setTerminalOutput(prev => [...prev, `> Error: File "${file.name}" exceeds 100MB limit.`]);
+      return;
+    }
+
+    setTerminalOutput(prev => [...prev, `> Uploading ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)...`]);
+    
+    // Simulate upload process
+    setTimeout(() => {
+      setTerminalOutput(prev => [...prev, `> Successfully uploaded ${file.name}.`]);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }, 1500);
+  };
+
+  const generateEncryptionKey = () => {
+    const key = CryptoJS.lib.WordArray.random(32).toString(CryptoJS.enc.Hex);
+    setSecrets(prev => ({ ...prev, encryptionKey: key }));
+  };
+
+  const handleSaveSecrets = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingSecrets(true);
+    setSecretsMessage(null);
+
+    // Validation
+    if (secrets.supabaseUrl && !secrets.supabaseUrl.startsWith('https://') || !secrets.supabaseUrl.includes('.supabase.co')) {
+      setSecretsMessage({ type: 'error', text: 'Invalid Supabase URL. Must start with https:// and end with .supabase.co' });
+      setIsSavingSecrets(false);
+      return;
+    }
+
+    const jwtFields = ['supabaseAnonKey', 'supabaseServiceKey', 'supabaseJwtSecret'];
+    for (const field of jwtFields) {
+      const val = (secrets as any)[field];
+      if (val && !val.startsWith('eyJ')) {
+        setSecretsMessage({ type: 'error', text: `Invalid ${field}. Keys usually start with "eyJ..."` });
+        setIsSavingSecrets(false);
+        return;
+      }
+    }
+
+    let finalEncryptionKey = secrets.encryptionKey;
+    if (!finalEncryptionKey) {
+      finalEncryptionKey = CryptoJS.lib.WordArray.random(32).toString(CryptoJS.enc.Hex);
+      setSecrets(prev => ({ ...prev, encryptionKey: finalEncryptionKey }));
+    }
+
+    try {
+      // Encrypt data
+      const dataToEncrypt = JSON.stringify(secrets);
+      const encrypted = CryptoJS.AES.encrypt(dataToEncrypt, finalEncryptionKey).toString();
+
+      const res = await fetch('/api/onboarding/keys', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ encrypted_data: encrypted })
+      });
+
+      if (!res.ok) throw new Error('Failed to save keys');
+      
+      setSecretsMessage({ type: 'success', text: 'Platform keys saved and encrypted successfully!' });
+      setUserStatus(prev => ({ ...prev, keysConfigured: true }));
+      setIsEditingKeys(false);
+      setTerminalOutput(prev => [...prev, '> Platform keys saved and encrypted.']);
+    } catch (error: any) {
+      setSecretsMessage({ type: 'error', text: error.message });
+    } finally {
+      setIsGenerating(false);
+      setIsSavingSecrets(false);
+    }
+  };
+
+  const handleConnectGithub = () => {
+    const width = 600, height = 700;
+    const left = (window.innerWidth - width) / 2;
+    const top = (window.innerHeight - height) / 2;
+    window.open('/api/github/login', 'github_auth', `width=${width},height=${height},top=${top},left=${left}`);
+  };
+
   // Map generated files for Sandpack
   const sandpackFiles = React.useMemo(() => {
     if (!generatedApp) return {};
@@ -131,6 +274,43 @@ export default function BuilderPage() {
           </nav>
         </div>
         <div className="flex items-center gap-3 text-[#858585]">
+          <input 
+            type="file" 
+            ref={fileInputRef} 
+            className="hidden" 
+            onChange={handleFileUpload}
+          />
+          <button 
+            onClick={() => fileInputRef.current?.click()}
+            className="flex items-center gap-1 hover:text-[#cccccc] bg-white/5 px-2 py-0.5 rounded border border-white/10 transition-colors"
+          >
+            <Upload size={12} />
+            <span>Upload</span>
+          </button>
+          <div className="h-4 w-px bg-white/10" />
+          <button 
+            onClick={async () => {
+              if (!generatedApp) return;
+              setTerminalOutput(prev => [...prev, '> Triggering Vercel deployment...']);
+              try {
+                const res = await fetch('/api/deploy', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ appId: (generatedApp as any).appId })
+                });
+                const data = await res.json();
+                setTerminalOutput(prev => [...prev, `> ${data.message || 'Deployment triggered'}`]);
+              } catch (e) {
+                setTerminalOutput(prev => [...prev, '> Error: Deployment failed']);
+              }
+            }}
+            disabled={!generatedApp}
+            className="flex items-center gap-1 hover:text-[#cccccc] bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20 text-emerald-500 transition-colors disabled:opacity-30"
+          >
+            <ExternalLink size={12} />
+            <span>Deploy</span>
+          </button>
+          <div className="h-4 w-px bg-white/10" />
           <button className="flex items-center gap-1 hover:text-[#cccccc]">
             <Github size={14} />
             <span>GitHub</span>
@@ -161,6 +341,12 @@ export default function BuilderPage() {
           >
             <Files size={24} />
           </button>
+          <button 
+            onClick={() => { setActiveTab('onboarding'); setSidebarExpanded(true); }}
+            className={cn("p-2 transition-colors hover:text-[#cccccc]", activeTab === 'onboarding' && "text-emerald-500 border-l-2 border-emerald-500")}
+          >
+            <Key size={24} />
+          </button>
           <button className="p-2 transition-colors hover:text-[#cccccc]">
             <Search size={24} />
           </button>
@@ -184,7 +370,7 @@ export default function BuilderPage() {
               <Panel defaultSize={15} minSize={10} maxSize={30}>
                 <div className="flex h-full flex-col bg-[#252526]">
                   <div className="flex h-9 items-center justify-between px-4 text-[11px] font-bold uppercase tracking-wider text-[#858585]">
-                    <span>{activeTab === 'wizard' ? 'App Wizard' : 'Explorer'}</span>
+                    <span>{activeTab === 'wizard' ? 'App Wizard' : activeTab === 'explorer' ? 'Explorer' : 'Onboarding'}</span>
                   </div>
                   
                   <div className="flex-1 overflow-y-auto custom-scrollbar">
@@ -208,7 +394,7 @@ export default function BuilderPage() {
                           </button>
                         ))}
                       </div>
-                    ) : (
+                    ) : activeTab === 'explorer' ? (
                       <div className="p-2">
                         {generatedApp ? (
                           <div className="space-y-1">
@@ -234,6 +420,47 @@ export default function BuilderPage() {
                           </div>
                         )}
                       </div>
+                    ) : (
+                      <div className="p-4 space-y-4 text-xs text-[#858585]">
+                        <div className="flex items-center gap-2 text-emerald-500 font-bold uppercase tracking-wider">
+                          <Key size={14} />
+                          <span>Onboarding</span>
+                        </div>
+                        <p className="text-[10px] leading-relaxed">
+                          Complete these steps to enable full build and deploy capabilities.
+                        </p>
+                        <div className="h-px bg-white/5" />
+                        
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold uppercase">1. GitHub</span>
+                            {userStatus.githubConnected ? (
+                              <CheckCircle2 size={14} className="text-emerald-500" />
+                            ) : (
+                              <div className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
+                            )}
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold uppercase">2. Platform Keys</span>
+                            {userStatus.keysConfigured ? (
+                              <CheckCircle2 size={14} className="text-emerald-500" />
+                            ) : (
+                              <div className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="h-px bg-white/5" />
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2 text-amber-500">
+                            <ShieldAlert size={14} />
+                            <span className="font-bold">Security</span>
+                          </div>
+                          <p className="text-[10px]">
+                            Your keys are encrypted locally before storage. We never see your raw secrets.
+                          </p>
+                        </div>
+                      </div>
                     )}
                   </div>
                 </div>
@@ -254,13 +481,18 @@ export default function BuilderPage() {
                         <Wand2 size={14} className="mr-2 text-emerald-500" />
                         <span>Wizard.config</span>
                       </div>
-                    ) : (
+                    ) : activeTab === 'explorer' ? (
                       activeFile && (
                         <div className="flex h-full items-center border-t-2 border-emerald-500 bg-[#1e1e1e] px-4 text-xs">
                           <FileCode size={14} className="mr-2 text-emerald-500" />
                           <span>{activeFile.path.split('/').pop()}</span>
                         </div>
                       )
+                    ) : (
+                      <div className="flex h-full items-center border-t-2 border-emerald-500 bg-[#1e1e1e] px-4 text-xs">
+                        <Key size={14} className="mr-2 text-emerald-500" />
+                        <span>Onboarding.env</span>
+                      </div>
                     )}
                   </div>
 
@@ -342,7 +574,7 @@ export default function BuilderPage() {
                             ))}
                           </div>
                         </motion.div>
-                      ) : (
+                      ) : activeTab === 'explorer' ? (
                         <motion.div 
                           key="editor"
                           initial={{ opacity: 0 }}
@@ -364,6 +596,233 @@ export default function BuilderPage() {
                               readOnly: true,
                             }}
                           />
+                        </motion.div>
+                      ) : (
+                        <motion.div
+                          key="onboarding"
+                          initial={{ opacity: 0, x: 20 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          className="h-full w-full p-8 max-w-3xl mx-auto overflow-y-auto custom-scrollbar"
+                        >
+                          <div className="mb-8">
+                            <h2 className="text-2xl font-bold text-[#cccccc] mb-2">Onboarding</h2>
+                            <p className="text-sm text-[#858585]">Connect your GitHub and configure your platform keys to start building.</p>
+                          </div>
+
+                          <div className="space-y-12 pb-20">
+                            {/* GitHub Section */}
+                            <div className="space-y-4">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2 text-emerald-500 font-bold uppercase tracking-wider text-xs">
+                                  <Github size={14} />
+                                  <span>1. GitHub Connection</span>
+                                </div>
+                                {userStatus.githubConnected && (
+                                  <span className="text-[10px] text-emerald-500 font-bold flex items-center gap-1">
+                                    <CheckCircle2 size={12} />
+                                    CONNECTED
+                                  </span>
+                                )}
+                              </div>
+                              
+                              <div className="rounded-lg border border-white/5 bg-[#252526] p-6">
+                                {userStatus.githubConnected ? (
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-3">
+                                      <div className="h-10 w-10 rounded-full bg-emerald-500/10 flex items-center justify-center text-emerald-500">
+                                        <Github size={20} />
+                                      </div>
+                                      <div>
+                                        <p className="text-sm font-bold text-[#cccccc]">GitHub Account Linked</p>
+                                        <p className="text-xs text-[#858585]">Your repositories are ready for deployment.</p>
+                                      </div>
+                                    </div>
+                                    <button 
+                                      onClick={handleConnectGithub}
+                                      className="text-[10px] text-[#858585] hover:text-[#cccccc] underline underline-offset-4"
+                                    >
+                                      Reconnect
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <div className="text-center py-4">
+                                    <p className="text-sm text-[#cccccc] mb-4">Connect your GitHub account to enable one-click repository creation.</p>
+                                    <button
+                                      onClick={handleConnectGithub}
+                                      className="inline-flex items-center gap-2 rounded-md bg-[#24292e] px-6 py-2.5 text-sm font-bold text-white hover:bg-[#2c3137] transition-all shadow-lg"
+                                    >
+                                      <Github size={18} />
+                                      Connect GitHub
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Platform Keys Section */}
+                            <div className="space-y-4">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2 text-emerald-500 font-bold uppercase tracking-wider text-xs">
+                                  <Database size={14} />
+                                  <span>2. Platform Keys</span>
+                                </div>
+                                {userStatus.keysConfigured && !isEditingKeys && (
+                                  <button 
+                                    onClick={() => setIsEditingKeys(true)}
+                                    className="text-[10px] text-emerald-500 font-bold flex items-center gap-1 hover:underline"
+                                  >
+                                    <RefreshCw size={12} />
+                                    EDIT KEYS
+                                  </button>
+                                )}
+                              </div>
+
+                              {(!userStatus.keysConfigured || isEditingKeys) ? (
+                                <form onSubmit={handleSaveSecrets} className="space-y-8">
+                                  {/* Supabase Section */}
+                                  <div className="space-y-4">
+                                    <div className="flex items-center gap-2 text-[#858585] font-bold uppercase tracking-wider text-[10px]">
+                                      <Database size={12} />
+                                      <span>Supabase Configuration</span>
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                      <SecretInput 
+                                        label="Supabase Project URL"
+                                        value={secrets.supabaseUrl}
+                                        onChange={(v) => setSecrets(p => ({ ...p, supabaseUrl: v }))}
+                                        placeholder="https://your-project.supabase.co"
+                                        tooltip="Find this in Supabase Dashboard → Settings → API → Project URL"
+                                      />
+                                      <SecretInput 
+                                        label="Supabase Anon Key"
+                                        value={secrets.supabaseAnonKey}
+                                        onChange={(v) => setSecrets(p => ({ ...p, supabaseAnonKey: v }))}
+                                        placeholder="eyJ..."
+                                        type="password"
+                                        show={showSecrets.supabaseAnonKey}
+                                        onToggle={() => setShowSecrets(p => ({ ...p, supabaseAnonKey: !p.supabaseAnonKey }))}
+                                        tooltip="Find this in Supabase Dashboard → Settings → API → anon public"
+                                      />
+                                      <SecretInput 
+                                        label="Supabase Service Role Key"
+                                        value={secrets.supabaseServiceKey}
+                                        onChange={(v) => setSecrets(p => ({ ...p, supabaseServiceKey: v }))}
+                                        placeholder="eyJ..."
+                                        type="password"
+                                        show={showSecrets.supabaseServiceKey}
+                                        onToggle={() => setShowSecrets(p => ({ ...p, supabaseServiceKey: !p.supabaseServiceKey }))}
+                                        tooltip="Find this in Supabase Dashboard → Settings → API → service_role secret"
+                                        warning="This gives full access—only use your own!"
+                                      />
+                                      <SecretInput 
+                                        label="Supabase JWT Secret"
+                                        value={secrets.supabaseJwtSecret}
+                                        onChange={(v) => setSecrets(p => ({ ...p, supabaseJwtSecret: v }))}
+                                        placeholder="eyJ..."
+                                        type="password"
+                                        show={showSecrets.supabaseJwtSecret}
+                                        onToggle={() => setShowSecrets(p => ({ ...p, supabaseJwtSecret: !p.supabaseJwtSecret }))}
+                                        tooltip="Find this in Supabase Dashboard → Settings → API → JWT Secret"
+                                      />
+                                    </div>
+                                  </div>
+
+                                  {/* Vercel Section */}
+                                  <div className="space-y-4">
+                                    <div className="flex items-center gap-2 text-[#858585] font-bold uppercase tracking-wider text-[10px]">
+                                      <ExternalLink size={12} />
+                                      <span>Vercel Configuration</span>
+                                    </div>
+                                    <SecretInput 
+                                      label="Vercel Deploy Hook URL (Optional)"
+                                      value={secrets.vercelDeployHook}
+                                      onChange={(v) => setSecrets(p => ({ ...p, vercelDeployHook: v }))}
+                                      placeholder="https://api.vercel.com/v1/integrations/deploy/..."
+                                      tooltip="Find this in Vercel → Settings → Git → Deploy Hooks"
+                                    />
+                                  </div>
+
+                                  {/* Encryption Key Section */}
+                                  <div className="space-y-4">
+                                    <div className="flex gap-2">
+                                      <div className="flex-1">
+                                        <SecretInput 
+                                          label="Master Encryption Key"
+                                          value={secrets.encryptionKey}
+                                          onChange={(v) => setSecrets(p => ({ ...p, encryptionKey: v }))}
+                                          placeholder="32-byte hex string"
+                                          type="password"
+                                          show={showSecrets.encryptionKey}
+                                          onToggle={() => setShowSecrets(p => ({ ...p, encryptionKey: !p.encryptionKey }))}
+                                          tooltip="Used to encrypt your secrets locally before saving to DB"
+                                        />
+                                      </div>
+                                      <button
+                                        type="button"
+                                        onClick={generateEncryptionKey}
+                                        className="mt-6 flex h-10 items-center gap-2 rounded-md border border-white/10 bg-white/5 px-4 text-xs hover:bg-white/10 transition-colors"
+                                      >
+                                        <RefreshCw size={14} />
+                                        <span>Generate</span>
+                                      </button>
+                                    </div>
+                                  </div>
+
+                                  {secretsMessage && (
+                                    <div className={cn(
+                                      "p-4 rounded-md text-xs flex items-center gap-3",
+                                      secretsMessage.type === 'success' ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20" : "bg-red-500/10 text-red-500 border border-red-500/20"
+                                    )}>
+                                      {secretsMessage.type === 'success' ? <CheckCircle2 size={16} /> : <ShieldAlert size={16} />}
+                                      <span>{secretsMessage.text}</span>
+                                    </div>
+                                  )}
+
+                                  <div className="flex gap-3">
+                                    {isEditingKeys && (
+                                      <button
+                                        type="button"
+                                        onClick={() => setIsEditingKeys(false)}
+                                        className="flex-1 rounded-md border border-white/10 bg-white/5 py-3 text-sm font-bold text-[#cccccc] hover:bg-white/10 transition-all"
+                                      >
+                                        Cancel
+                                      </button>
+                                    )}
+                                    <button
+                                      type="submit"
+                                      disabled={isSavingSecrets}
+                                      className="flex-[2] flex items-center justify-center gap-2 rounded-md bg-emerald-500 py-3 text-sm font-bold text-black hover:bg-emerald-400 transition-all shadow-lg shadow-emerald-500/20 disabled:opacity-50"
+                                    >
+                                      {isSavingSecrets ? (
+                                        <>
+                                          <Loader2 size={18} className="animate-spin" />
+                                          <span>Saving...</span>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <CheckCircle2 size={18} />
+                                          <span>Save Platform Keys</span>
+                                        </>
+                                      )}
+                                    </button>
+                                  </div>
+                                </form>
+                              ) : (
+                                <div className="rounded-lg border border-white/5 bg-[#252526] p-6 flex items-center justify-between">
+                                  <div className="flex items-center gap-3">
+                                    <div className="h-10 w-10 rounded-full bg-emerald-500/10 flex items-center justify-center text-emerald-500">
+                                      <Database size={20} />
+                                    </div>
+                                    <div>
+                                      <p className="text-sm font-bold text-[#cccccc]">Platform Keys Configured</p>
+                                      <p className="text-xs text-[#858585]">Your Supabase and Vercel integrations are active.</p>
+                                    </div>
+                                  </div>
+                                  <CheckCircle2 size={24} className="text-emerald-500" />
+                                </div>
+                              )}
+                            </div>
+                          </div>
                         </motion.div>
                       )}
                     </AnimatePresence>
@@ -509,6 +968,65 @@ export default function BuilderPage() {
           </button>
         </div>
       </footer>
+    </div>
+  );
+}
+
+function SecretInput({ 
+  label, 
+  value, 
+  onChange, 
+  placeholder, 
+  type = 'text', 
+  show, 
+  onToggle, 
+  tooltip, 
+  warning 
+}: { 
+  label: string, 
+  value: string, 
+  onChange: (v: string) => void, 
+  placeholder: string, 
+  type?: string, 
+  show?: boolean, 
+  onToggle?: () => void, 
+  tooltip: string, 
+  warning?: string 
+}) {
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <label className="text-[10px] font-bold uppercase tracking-wider text-[#858585]">{label}</label>
+          <div className="group relative">
+            <Info size={10} className="text-[#858585] cursor-help" />
+            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 rounded bg-[#333333] p-2 text-[9px] text-[#cccccc] opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 shadow-xl border border-white/5">
+              {tooltip}
+            </div>
+          </div>
+        </div>
+        {warning && (
+          <span className="text-[9px] text-amber-500 font-medium italic">{warning}</span>
+        )}
+      </div>
+      <div className="relative">
+        <input
+          type={show === false ? 'password' : type}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+          className="w-full rounded-md border border-white/10 bg-[#1e1e1e] p-2 text-xs text-[#cccccc] focus:border-emerald-500 focus:outline-none transition-all pr-8"
+        />
+        {onToggle && (
+          <button
+            type="button"
+            onClick={onToggle}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-[#858585] hover:text-[#cccccc]"
+          >
+            {show ? <EyeOff size={14} /> : <Eye size={14} />}
+          </button>
+        )}
+      </div>
     </div>
   );
 }

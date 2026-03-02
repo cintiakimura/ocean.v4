@@ -18,12 +18,24 @@ export default function AuthPage({ mode }: AuthPageProps) {
     e.preventDefault();
     setIsLoading(true);
     
-    // Simulate auth
-    setTimeout(() => {
+    try {
+      const response = await fetch('/api/auth/magic-link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+
+      if (!response.ok) throw new Error('Failed to send magic link');
+      
+      alert('Magic link sent to your email!');
+      // In a real app, we'd wait for the user to click the link.
+      // For this demo, we'll just navigate to builder after a short delay.
+      setTimeout(() => navigate('/builder'), 2000);
+    } catch (error) {
+      alert('Error: ' + (error instanceof Error ? error.message : 'Unknown error'));
+    } finally {
       setIsLoading(false);
-      // In a real app, we'd handle session here. For now, just navigate to builder.
-      navigate('/builder');
-    }, 1500);
+    }
   };
 
   return (
