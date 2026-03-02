@@ -1,0 +1,50 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Segoe UI", "San Francisco", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Cascadia Code", "Consolas", "Menlo", "Monaco", "Source Code Pro", ui-monospace, SFMono-Regular, monospace;
+
+  --color-vscode-bg: #1E1E1E;
+  --color-vscode-editor: #252526;
+  --color-vscode-accent: #007ACC;
+  --color-vscode-text: #D4D4D4;
+  --color-vscode-muted: #858585;
+  --color-vscode-sidebar: #252526;
+  --color-vscode-hover: #2A2D2E;
+  --color-vscode-status: #007ACC;
+}
+
+@layer base {
+  body {
+    @apply bg-vscode-bg text-vscode-text font-sans antialiased overflow-hidden;
+  }
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #333;
+  border: 2px solid #1e1e1e;
+  border-radius: 5px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #444;
+}
+
+/* Sandpack overrides for dark theme */
+.sp-layout {
+  border: none !important;
+  border-radius: 0 !important;
+}
+
+.sp-preview-container {
+  background: #1e1e1e !important;
+}

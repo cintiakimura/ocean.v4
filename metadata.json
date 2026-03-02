@@ -1,0 +1,5 @@
+{
+  "name": "GrokSaaS Builder",
+  "description": "A VS Code-inspired SaaS generator powered by Grok AI, creating Next.js and Supabase applications from structured requirements.",
+  "requestFramePermissions": []
+}
