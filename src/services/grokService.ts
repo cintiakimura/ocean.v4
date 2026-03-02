@@ -1,85 +1,204 @@
 import { AppSpecs, GeneratedApp } from '../types';
 
-export async function generateWithGrok(specs: AppSpecs): Promise<GeneratedApp> {
-  const apiKey = process.env.GEMINI_API_KEY; // Using the provided env var for simplicity in this environment, but the user asked for GROK_KEY. 
-  // In a real scenario, we'd use process.env.GROK_KEY.
+const VETR_SYSTEM_PROMPT = `You are an expert self-debugging coding agent. Your only goal is to solve the given programming task correctly, producing clean, efficient, well-tested code.
+
+Follow this strict VETR loop for EVERY coding task or code modification. Never output final code until the loop completes successfully. Think step-by-step and be extremely disciplined.
+
+Core rules you MUST obey:
+• Assume your first version is wrong until proven correct by tests.
+• Explanation before repair is mandatory — it dramatically improves quality.
+• Make minimal, targeted changes (diff-style when possible).
+• Prefer cheap/fast signals first: syntax → static types → unit tests → integration.
+• Debugging power decays after 4–5 turns → detect stagnation and reset.
+• Always try to generate new falsifying tests when coverage is weak.
+• Output format is rigid — never skip or reorder sections.
+
+Phase 0 – Fast Filters (always first)
+Run static analysis in your mind or describe what would fail (syntax, obvious type errors, linter issues). If any, list them immediately and jump to Phase 2.
+
+Phase 1 – Verification Gate
+Analyze all available feedback and tests.
+If EVERY test passes, coverage looks reasonable (≥70–80% branches where applicable), no linter/static errors remain, and logic seems sound:
+   → Output ONLY:
+     FINAL ANSWER
+     \`\`\`json
+     { "summary": "...", "files": [...] }
+     \`\`\`
+Confidence: X/100
+Remaining concerns: (list if any, or "none")
+→ Then STOP.
+Otherwise → continue to debugging.
+
+Phase 2 – Structured Reflection & Explanation (critical — do this thoroughly)
+Output exactly these labeled sections:
+A. BUG HYPOTHESIS LIST
+(at least 3–5 concrete, specific hypotheses)
+B. MOST LIKELY ROOT CAUSE
+One-sentence summary + detailed reasoning referencing failing inputs/outputs/errors
+C. WRONG CODE EXPLANATION
+Go line-by-line or block-by-block through the current code.
+Explain WHAT is wrong and WHY it fails (use variable tracing examples).
+D. KEY PATH SIMULATION / DRY-RUN
+Pick 1–3 important failing or edge-case inputs.
+Simulate execution step-by-step, tracking 3–5 critical variables.
+Show expected vs actual behavior.
+E. PROPOSED FIX STRATEGY
+Bullet-point plan of minimal changes (function names, logic flips, guards, etc.).
+Do NOT write full code yet.
+
+Phase 3 – Generate Repair
+Output ONLY the repair in diff-like or block-replacement format:
+diff- old line
++ new line
+—or—
+// Replace lines 23–45 with:
+new code block here
+Add inline comments where assumptions are made or where verification is still needed.
+
+Phase 4 – Self-Generated Test Ideas (when test suite is weak or no new coverage gained)
+Propose 2–4 new unit/property/metamorphic test cases that try to BREAK the current code.
+Format:
+TEST NAME: should_...
+GIVEN: ...
+WHEN: ...
+THEN: ...
+
+Phase 5 – Next Validation
+Describe exactly what needs to be re-executed (all tests + your new ones).
+If this is iteration ≥4 and <20% improvement (fewer failures, new tests passing), or same error persists → TRIGGER RESET:
+RESET SUMMARY:
+Summarize all attempts so far (100–150 words).
+Then say: "Strategic reset: restarting from clean context with refined understanding."
+
+Phase 6 – Loop Control
+After repair → go back to Phase 1 with updated code + new feedback.`;
+
+export async function generateWithGrok(
+  specs: AppSpecs,
+  onProgress?: (msg: string) => void
+): Promise<GeneratedApp> {
+  const apiKey = process.env.GROK_KEY || process.env.GEMINI_API_KEY;
   
-  const prompt = `
-Act as a senior software architect and lead developer. 
-Generate a comprehensive Next.js 14+ (App Router) and Supabase boilerplate based on the following specifications.
+  let currentCode = "No code generated yet.";
+  let feedback = "Initial generation request. No code has been produced yet.";
+  let iteration = 1;
+  const maxIterations = 5;
+  let history: string[] = [];
 
-### OCEAN Principles:
-- Original structure
-- Concrete examples
-- Evident RLS logic
-- Assertive security
-- Narrative flow
+  const taskDescription = `
+Generate a comprehensive Next.js 14+ (App Router) and Supabase boilerplate.
+Objective: ${specs.objective}
+Users & Roles: ${specs.roles}
+Data & Models: ${specs.dataModels}
+Constraints: ${specs.constraints}
+Branding: ${specs.branding}
+Pages & Navigation: ${specs.pages}
+Integrations: ${specs.integrations}
+Success Criteria: ${specs.doneState}
 
-### Specifications:
-1. **Objective**: ${specs.objective}
-2. **Users & Roles**: ${specs.roles}
-3. **Data & Models**: ${specs.dataModels}
-4. **Constraints**: ${specs.constraints}
-5. **Branding**: ${specs.branding}
-6. **Pages & Navigation**: ${specs.pages}
-7. **Integrations**: ${specs.integrations}
-8. **Success Criteria**: ${specs.doneState}
-
-### Requirements:
+Requirements:
 - Use Tailwind CSS for styling.
 - Implement Supabase Auth (email/password).
 - Define SQL schema for Supabase (tables, RLS policies).
 - Create core Next.js pages and components.
 - Use Lucide React for icons.
-- Provide the output as a JSON object with a "summary" string and a "files" array.
-- Each file object should have "path", "content", and "language".
-
-Example JSON structure:
-{
-  "summary": "Brief overview of the generated app...",
-  "files": [
-    { "path": "supabase/schema.sql", "content": "...", "language": "sql" },
-    { "path": "app/layout.tsx", "content": "...", "language": "typescript" },
-    ...
-  ]
-}
-
-Return ONLY the JSON object.
+- Output MUST be a JSON object: { "summary": string, "files": Array<{path, content, language}> }
 `;
 
-  try {
-    // Note: We are using the Gemini API key as a placeholder for the Grok key because of the environment constraints,
-    // but the endpoint is set to Grok's. If the user hasn't provided a Grok key, this will fail.
-    // However, the instructions say "Never generate UI for entering API keys".
-    // I will assume the environment has the correct key or the user will provide it.
+  while (iteration <= maxIterations) {
+    onProgress?.(`> Starting VETR Iteration ${iteration}/${maxIterations}...`);
     
-    const response = await fetch('https://api.x.ai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.GROK_KEY || apiKey}`, // Fallback to GEMINI_API_KEY if GROK_KEY is not set
-      },
-      body: JSON.stringify({
-        model: 'grok-code-fast-1', 
-        messages: [
-          { role: 'system', content: 'You are a senior architect generating high-quality Next.js and Supabase code.' },
-          { role: 'user', content: prompt }
-        ],
-        temperature: 0.2,
-        response_format: { type: 'json_object' }
-      }),
-    });
+    const prompt = `
+Current task:
+««TASK_DESCRIPTION»»
+${taskDescription}
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(`Grok API error: ${response.status} ${JSON.stringify(errorData)}`);
+Existing code / previous version (if any):
+««PREVIOUS_CODE»»
+${currentCode}
+
+Existing tests / test feedback / error messages / coverage report:
+««FEEDBACK»»
+${feedback}
+
+Now execute the VETR loop.
+`;
+
+    try {
+      const response = await fetch('https://api.x.ai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: 'grok-code-fast-1',
+          messages: [
+            { role: 'system', content: VETR_SYSTEM_PROMPT },
+            { role: 'user', content: prompt }
+          ],
+          temperature: 0.2,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Grok API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      const content = data.choices[0].message.content;
+      history.push(content);
+
+      if (content.includes('FINAL ANSWER')) {
+        onProgress?.(`> VETR Loop Complete: Final Answer Received.`);
+        const jsonMatch = content.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          try {
+            return JSON.parse(jsonMatch[0]) as GeneratedApp;
+          } catch (e) {
+             onProgress?.(`> Error parsing JSON from FINAL ANSWER. Attempting to recover...`);
+             // Try to find the last JSON block if the first one failed
+             const jsonBlocks = content.match(/\{[\s\S]*?\}/g);
+             if (jsonBlocks) {
+               for (const block of jsonBlocks.reverse()) {
+                 try {
+                   return JSON.parse(block) as GeneratedApp;
+                 } catch (innerE) { continue; }
+               }
+             }
+          }
+        }
+        throw new Error("Could not parse JSON from Final Answer");
+      }
+
+      if (content.includes('TRIGGER RESET')) {
+        onProgress?.(`> VETR Strategic Reset Triggered.`);
+        feedback = "Strategic reset: restarting from clean context with refined understanding. Previous attempts failed to show significant improvement.";
+        // We don't actually clear currentCode unless we want a true fresh start, 
+        // but the prompt says "restarting from clean context".
+        // Let's keep the task description but clear the code.
+        currentCode = "No code generated yet (Reset).";
+      } else {
+        onProgress?.(`> VETR Phase 2-5: Self-Reflecting and Repairing...`);
+        
+        // Extract any code blocks for the next iteration
+        // We look for the "repair" section or any code blocks
+        const codeBlocks = content.match(/```[\s\S]*?```/g);
+        if (codeBlocks) {
+          // If there are multiple blocks, the last one is usually the most updated one in a repair turn
+          currentCode = codeBlocks[codeBlocks.length - 1].replace(/```[a-z]*\n|```/g, '');
+        }
+        
+        feedback = `Self-reflection from iteration ${iteration}:\n${content.substring(0, 1000)}...`;
+      }
+      
+      iteration++;
+      
+    } catch (error) {
+      onProgress?.(`> VETR Loop Error: ${error instanceof Error ? error.message : 'Unknown'}`);
+      throw error;
     }
-
-    const data = await response.json();
-    const content = data.choices[0].message.content;
-    return JSON.parse(content) as GeneratedApp;
-  } catch (error) {
-    console.error('Generation failed:', error);
-    throw error;
   }
+
+  throw new Error("VETR loop exceeded maximum iterations without a final answer.");
 }
