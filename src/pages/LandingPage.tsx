@@ -1,7 +1,8 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { Wand2, Zap, Shield, Code, ArrowRight, Github, Globe, Database, Layout } from 'lucide-react';
+import { Zap, Shield, Code, ArrowRight, Github, Globe, Database, Layout, Wand2 } from 'lucide-react';
+import { Logo } from '../components/Logo';
 
 export default function LandingPage() {
   return (
@@ -9,12 +10,9 @@ export default function LandingPage() {
       {/* Navigation */}
       <nav className="fixed top-0 w-full z-50 border-b border-white/5 bg-black/50 backdrop-blur-xl">
         <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
-          <div className="flex items-center gap-3 group cursor-pointer">
-            <div className="w-10 h-10 bg-emerald-500 rounded-xl flex items-center justify-center group-hover:rotate-12 transition-transform duration-300">
-              <Wand2 className="text-black w-6 h-6" />
-            </div>
-            <span className="font-bold text-xl tracking-tight">kyn</span>
-          </div>
+          <Link to="/" className="flex items-center group cursor-pointer">
+            <Logo className="h-10 w-auto" />
+          </Link>
           
           <div className="hidden md:flex items-center gap-8 text-sm font-medium text-white/60">
             <a href="#features" className="hover:text-white transition-colors">Features</a>
@@ -45,23 +43,22 @@ export default function LandingPage() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6 }}
-            className="text-center max-w-4xl mx-auto"
+            className="text-left max-w-4xl"
           >
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-emerald-400 text-xs font-bold uppercase tracking-widest mb-8">
               <Zap className="w-3 h-3 fill-current" />
-              Powered by Grok-Code-Fast-1
+              Powered by Grok
             </div>
             
-            <h1 className="text-6xl md:text-8xl font-bold tracking-tighter leading-[0.9] mb-8">
-              Build your SaaS <br />
-              <span className="text-emerald-500">at the speed of thought.</span>
+            <h1 className="text-8xl md:text-[10rem] font-bold tracking-tighter leading-[0.9] mb-6">
+              <span className="text-emerald-500">kyn</span>
             </h1>
             
-            <p className="text-xl text-white/50 max-w-2xl mx-auto mb-12 leading-relaxed">
-              The ultimate AI architect for modern developers. Generate full-stack Next.js 14+ and Supabase applications from simple requirements.
+            <p className="text-2xl md:text-4xl text-white/80 max-w-3xl mb-12 leading-tight font-normal">
+              the first architecture focused and self debugged, all in one app builder for developers
             </p>
 
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+            <div className="flex flex-col sm:flex-row items-center justify-start gap-4">
               <Link to="/signup" className="w-full sm:w-auto px-8 py-4 bg-emerald-500 text-black rounded-2xl font-bold text-lg hover:bg-emerald-400 transition-all hover:scale-105 flex items-center justify-center gap-2 group">
                 Start Building Free
                 <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
@@ -129,11 +126,8 @@ export default function LandingPage() {
       {/* Footer */}
       <footer className="py-20 border-t border-white/5 bg-black">
         <div className="max-w-7xl mx-auto px-6 flex flex-col md:flex-row justify-between items-center gap-8">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center">
-              <Wand2 className="text-black w-5 h-5" />
-            </div>
-            <span className="font-bold text-lg tracking-tight">kyn</span>
+          <div className="flex items-center">
+            <Logo className="h-8 w-auto" />
           </div>
           <p className="text-white/30 text-sm">
             © 2026 kyn. Built with Grok.

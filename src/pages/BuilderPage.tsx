@@ -10,7 +10,6 @@ import {
   Settings, 
   ChevronRight, 
   ChevronLeft, 
-  Wand2, 
   Layout, 
   Database, 
   Users, 
@@ -26,8 +25,10 @@ import {
   ExternalLink,
   Loader2,
   Code2,
-  LogOut
+  LogOut,
+  Wand2
 } from 'lucide-react';
+import { Logo } from '../components/Logo';
 import Editor from '@monaco-editor/react';
 import { 
   SandpackProvider, 
@@ -115,9 +116,8 @@ export default function BuilderPage() {
       {/* Top Bar */}
       <header className="flex h-9 items-center justify-between border-b border-white/5 bg-[#252526] px-3 text-xs">
         <div className="flex items-center gap-4">
-          <Link to="/" className="flex items-center gap-1.5 font-semibold text-emerald-500">
-            <Wand2 size={14} />
-            <span>kyn Builder</span>
+          <Link to="/" className="flex items-center group">
+            <Logo className="h-6 w-auto" />
           </Link>
           <nav className="flex gap-3 text-[#858585]">
             <button className="hover:text-[#cccccc]">File</button>

@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { Wand2, Mail, Lock, ArrowRight, Github, Loader2, CheckCircle2 } from 'lucide-react';
+import { Mail, Lock, ArrowRight, Github, Loader2, CheckCircle2 } from 'lucide-react';
+import { Logo } from '../components/Logo';
 
 interface AuthPageProps {
   mode: 'login' | 'signup';
@@ -33,11 +34,8 @@ export default function AuthPage({ mode }: AuthPageProps) {
           <div className="absolute top-[-20%] left-[-20%] w-[60%] h-[60%] bg-emerald-500/10 blur-[120px] rounded-full" />
         </div>
 
-        <Link to="/" className="flex items-center gap-3 group relative z-10">
-          <div className="w-10 h-10 bg-emerald-500 rounded-xl flex items-center justify-center group-hover:rotate-12 transition-transform duration-300">
-            <Wand2 className="text-black w-6 h-6" />
-          </div>
-          <span className="font-bold text-xl tracking-tight">kyn</span>
+        <Link to="/" className="flex items-center group relative z-10">
+          <Logo className="h-10 w-auto" />
         </Link>
 
         <div className="relative z-10">
