@@ -70,6 +70,7 @@ export default function BuilderPage() {
   const [terminalOutput, setTerminalOutput] = useState<string[]>(['Welcome to kyn Builder v1.0.0', 'Ready to build your next SaaS...']);
   
   // Onboarding State
+  const [onboardingStep, setOnboardingStep] = useState(1);
   const [userStatus, setUserStatus] = useState({
     githubConnected: false,
     keysConfigured: false
@@ -88,9 +89,6 @@ export default function BuilderPage() {
   const [secretsMessage, setSecretsMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
   const [isEditingKeys, setIsEditingKeys] = useState(false);
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const navigate = useNavigate();
-
   // Check user status on load
   React.useEffect(() => {
     const checkStatus = async () => {
@@ -102,9 +100,14 @@ export default function BuilderPage() {
           keysConfigured: data.keysConfigured
         });
         
-        if (data.keysConfigured && data.encryptedData) {
-          // We don't decrypt here for security, but we could if we had the key
-          // For now just mark as configured
+        if (!data.githubConnected) {
+          setOnboardingStep(1);
+          setActiveTab('onboarding');
+        } else if (!data.keysConfigured) {
+          setOnboardingStep(2);
+          setActiveTab('onboarding');
+        } else {
+          setOnboardingStep(3);
         }
       } catch (e) {
         console.error('Failed to check user status');
@@ -116,6 +119,7 @@ export default function BuilderPage() {
     const handleMessage = (event: MessageEvent) => {
       if (event.data?.type === 'GITHUB_AUTH_SUCCESS') {
         setUserStatus(prev => ({ ...prev, githubConnected: true }));
+        setOnboardingStep(2);
         setTerminalOutput(prev => [...prev, '> GitHub connected successfully!']);
       }
     };
@@ -425,32 +429,37 @@ export default function BuilderPage() {
                         )}
                       </div>
                     ) : (
-                      <div className="p-4 space-y-4 text-xs text-[#858585]">
+                      <div className="p-4 space-y-6">
                         <div className="flex items-center gap-2 text-emerald-500 font-bold uppercase tracking-wider">
                           <Key size={14} />
                           <span>Onboarding</span>
                         </div>
-                        <p className="text-[10px] leading-relaxed">
-                          Complete these steps to enable full build and deploy capabilities.
-                        </p>
-                        <div className="h-px bg-white/5" />
                         
-                        <div className="space-y-3">
-                          <div className="flex items-center justify-between">
-                            <span className="text-[10px] font-bold uppercase">1. GitHub</span>
-                            {userStatus.githubConnected ? (
-                              <CheckCircle2 size={14} className="text-emerald-500" />
-                            ) : (
-                              <div className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
-                            )}
+                        {/* Step Progress */}
+                        <div className="space-y-4">
+                          <div className="flex items-center gap-3">
+                            <div className={cn(
+                              "flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold",
+                              onboardingStep >= 1 ? "bg-emerald-500 text-black" : "bg-white/10 text-[#858585]"
+                            )}>1</div>
+                            <span className={cn("text-[10px] font-bold uppercase", onboardingStep >= 1 ? "text-[#cccccc]" : "text-[#858585]")}>GitHub</span>
+                            {userStatus.githubConnected && <CheckCircle2 size={12} className="ml-auto text-emerald-500" />}
                           </div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-[10px] font-bold uppercase">2. Platform Keys</span>
-                            {userStatus.keysConfigured ? (
-                              <CheckCircle2 size={14} className="text-emerald-500" />
-                            ) : (
-                              <div className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
-                            )}
+                          <div className="flex items-center gap-3">
+                            <div className={cn(
+                              "flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold",
+                              onboardingStep >= 2 ? "bg-emerald-500 text-black" : "bg-white/10 text-[#858585]"
+                            )}>2</div>
+                            <span className={cn("text-[10px] font-bold uppercase", onboardingStep >= 2 ? "text-[#cccccc]" : "text-[#858585]")}>Vercel Hook</span>
+                            {secrets.vercelDeployHook && userStatus.keysConfigured && <CheckCircle2 size={12} className="ml-auto text-emerald-500" />}
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <div className={cn(
+                              "flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold",
+                              onboardingStep >= 3 ? "bg-emerald-500 text-black" : "bg-white/10 text-[#858585]"
+                            )}>3</div>
+                            <span className={cn("text-[10px] font-bold uppercase", onboardingStep >= 3 ? "text-[#cccccc]" : "text-[#858585]")}>Platform Keys</span>
+                            {userStatus.keysConfigured && <CheckCircle2 size={12} className="ml-auto text-emerald-500" />}
                           </div>
                         </div>
 
@@ -609,79 +618,75 @@ export default function BuilderPage() {
                           className="h-full w-full p-8 max-w-3xl mx-auto overflow-y-auto custom-scrollbar"
                         >
                           <div className="mb-8">
-                            <h2 className="text-2xl font-bold text-[#cccccc] mb-2">Onboarding</h2>
-                            <p className="text-sm text-[#858585]">Connect your GitHub and configure your platform keys to start building.</p>
+                            <h2 className="text-2xl font-bold text-[#cccccc] mb-2">Onboarding Wizard</h2>
+                            <p className="text-sm text-[#858585]">Follow the steps below to configure your development environment.</p>
                           </div>
 
                           <div className="space-y-12 pb-20">
-                            {/* GitHub Section */}
-                            <div className="space-y-4">
+                            {/* Step 1: GitHub */}
+                            <div className={cn("space-y-4 transition-opacity", onboardingStep !== 1 && "opacity-40 pointer-events-none")}>
                               <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-2 text-emerald-500 font-bold uppercase tracking-wider text-xs">
                                   <Github size={14} />
-                                  <span>1. GitHub Connection</span>
+                                  <span>Step 1: Connect GitHub</span>
                                 </div>
-                                {userStatus.githubConnected && (
-                                  <span className="text-[10px] text-emerald-500 font-bold flex items-center gap-1">
-                                    <CheckCircle2 size={12} />
-                                    CONNECTED
-                                  </span>
-                                )}
+                                {userStatus.githubConnected && <CheckCircle2 size={16} className="text-emerald-500" />}
                               </div>
                               
                               <div className="rounded-lg border border-white/5 bg-[#252526] p-6">
-                                {userStatus.githubConnected ? (
-                                  <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-3">
-                                      <div className="h-10 w-10 rounded-full bg-emerald-500/10 flex items-center justify-center text-emerald-500">
-                                        <Github size={20} />
-                                      </div>
-                                      <div>
-                                        <p className="text-sm font-bold text-[#cccccc]">GitHub Account Linked</p>
-                                        <p className="text-xs text-[#858585]">Your repositories are ready for deployment.</p>
-                                      </div>
-                                    </div>
-                                    <button 
-                                      onClick={handleConnectGithub}
-                                      className="text-[10px] text-[#858585] hover:text-[#cccccc] underline underline-offset-4"
-                                    >
-                                      Reconnect
-                                    </button>
-                                  </div>
-                                ) : (
-                                  <div className="text-center py-4">
-                                    <p className="text-sm text-[#cccccc] mb-4">Connect your GitHub account to enable one-click repository creation.</p>
-                                    <button
-                                      onClick={handleConnectGithub}
-                                      className="inline-flex items-center gap-2 rounded-md bg-[#24292e] px-6 py-2.5 text-sm font-bold text-white hover:bg-[#2c3137] transition-all shadow-lg"
-                                    >
-                                      <Github size={18} />
-                                      Connect GitHub
-                                    </button>
-                                  </div>
-                                )}
+                                <p className="text-sm text-[#cccccc] mb-4">Link your GitHub account to enable one-click repository creation and management.</p>
+                                <button
+                                  onClick={handleConnectGithub}
+                                  disabled={userStatus.githubConnected}
+                                  className={cn(
+                                    "inline-flex items-center gap-2 rounded-md px-6 py-2.5 text-sm font-bold transition-all shadow-lg",
+                                    userStatus.githubConnected ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20" : "bg-[#24292e] text-white hover:bg-[#2c3137]"
+                                  )}
+                                >
+                                  <Github size={18} />
+                                  {userStatus.githubConnected ? 'GitHub Connected' : 'Connect GitHub Account'}
+                                </button>
                               </div>
                             </div>
 
-                            {/* Platform Keys Section */}
-                            <div className="space-y-4">
+                            {/* Step 2: Vercel Deploy Hook */}
+                            <div className={cn("space-y-4 transition-opacity", onboardingStep !== 2 && "opacity-40 pointer-events-none")}>
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2 text-emerald-500 font-bold uppercase tracking-wider text-xs">
+                                  <ExternalLink size={14} />
+                                  <span>Step 2: Vercel Deploy Hook</span>
+                                </div>
+                              </div>
+                              
+                              <div className="rounded-lg border border-white/5 bg-[#252526] p-6 space-y-4">
+                                <p className="text-sm text-[#cccccc]">Provide your Vercel Deploy Hook URL to enable automatic deployments.</p>
+                                <SecretInput 
+                                  label="Vercel Deploy Hook URL"
+                                  value={secrets.vercelDeployHook}
+                                  onChange={(v) => setSecrets(p => ({ ...p, vercelDeployHook: v }))}
+                                  placeholder="https://api.vercel.com/v1/integrations/deploy/..."
+                                  tooltip="Find this in Vercel → Settings → Git → Deploy Hooks"
+                                />
+                                <button
+                                  onClick={() => setOnboardingStep(3)}
+                                  className="inline-flex items-center gap-2 rounded-md bg-emerald-500 px-6 py-2.5 text-sm font-bold text-black hover:bg-emerald-400 transition-all shadow-lg"
+                                >
+                                  Next Step
+                                  <ChevronRight size={18} />
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Step 3: Platform Keys */}
+                            <div className={cn("space-y-4 transition-opacity", onboardingStep !== 3 && "opacity-40 pointer-events-none")}>
                               <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-2 text-emerald-500 font-bold uppercase tracking-wider text-xs">
                                   <Database size={14} />
-                                  <span>2. Platform Keys</span>
+                                  <span>Step 3: Platform Keys</span>
                                 </div>
-                                {userStatus.keysConfigured && !isEditingKeys && (
-                                  <button 
-                                    onClick={() => setIsEditingKeys(true)}
-                                    className="text-[10px] text-emerald-500 font-bold flex items-center gap-1 hover:underline"
-                                  >
-                                    <RefreshCw size={12} />
-                                    EDIT KEYS
-                                  </button>
-                                )}
                               </div>
 
-                              {(!userStatus.keysConfigured || isEditingKeys) ? (
+                              <div className="rounded-lg border border-white/5 bg-[#252526] p-6">
                                 <form onSubmit={handleSaveSecrets} className="space-y-8">
                                   {/* Supabase Section */}
                                   <div className="space-y-4">
@@ -698,16 +703,6 @@ export default function BuilderPage() {
                                         tooltip="Find this in Supabase Dashboard → Settings → API → Project URL"
                                       />
                                       <SecretInput 
-                                        label="Supabase Anon Key"
-                                        value={secrets.supabaseAnonKey}
-                                        onChange={(v) => setSecrets(p => ({ ...p, supabaseAnonKey: v }))}
-                                        placeholder="eyJ..."
-                                        type="password"
-                                        show={showSecrets.supabaseAnonKey}
-                                        onToggle={() => setShowSecrets(p => ({ ...p, supabaseAnonKey: !p.supabaseAnonKey }))}
-                                        tooltip="Find this in Supabase Dashboard → Settings → API → anon public"
-                                      />
-                                      <SecretInput 
                                         label="Supabase Service Role Key"
                                         value={secrets.supabaseServiceKey}
                                         onChange={(v) => setSecrets(p => ({ ...p, supabaseServiceKey: v }))}
@@ -716,17 +711,6 @@ export default function BuilderPage() {
                                         show={showSecrets.supabaseServiceKey}
                                         onToggle={() => setShowSecrets(p => ({ ...p, supabaseServiceKey: !p.supabaseServiceKey }))}
                                         tooltip="Find this in Supabase Dashboard → Settings → API → service_role secret"
-                                        warning="This gives full access—only use your own!"
-                                      />
-                                      <SecretInput 
-                                        label="Supabase JWT Secret"
-                                        value={secrets.supabaseJwtSecret}
-                                        onChange={(v) => setSecrets(p => ({ ...p, supabaseJwtSecret: v }))}
-                                        placeholder="eyJ..."
-                                        type="password"
-                                        show={showSecrets.supabaseJwtSecret}
-                                        onToggle={() => setShowSecrets(p => ({ ...p, supabaseJwtSecret: !p.supabaseJwtSecret }))}
-                                        tooltip="Find this in Supabase Dashboard → Settings → API → JWT Secret"
                                       />
                                     </div>
                                   </div>
@@ -746,21 +730,6 @@ export default function BuilderPage() {
                                       show={showSecrets.grokKey}
                                       onToggle={() => setShowSecrets(p => ({ ...p, grokKey: !p.grokKey }))}
                                       tooltip="Find this in console.x.ai"
-                                    />
-                                  </div>
-
-                                  {/* Vercel Section */}
-                                  <div className="space-y-4">
-                                    <div className="flex items-center gap-2 text-[#858585] font-bold uppercase tracking-wider text-[10px]">
-                                      <ExternalLink size={12} />
-                                      <span>Vercel Configuration</span>
-                                    </div>
-                                    <SecretInput 
-                                      label="Vercel Deploy Hook URL (Optional)"
-                                      value={secrets.vercelDeployHook}
-                                      onChange={(v) => setSecrets(p => ({ ...p, vercelDeployHook: v }))}
-                                      placeholder="https://api.vercel.com/v1/integrations/deploy/..."
-                                      tooltip="Find this in Vercel → Settings → Git → Deploy Hooks"
                                     />
                                   </div>
 
@@ -823,26 +792,13 @@ export default function BuilderPage() {
                                       ) : (
                                         <>
                                           <CheckCircle2 size={18} />
-                                          <span>Save Platform Keys</span>
+                                          <span>Complete Setup</span>
                                         </>
                                       )}
                                     </button>
                                   </div>
                                 </form>
-                              ) : (
-                                <div className="rounded-lg border border-white/5 bg-[#252526] p-6 flex items-center justify-between">
-                                  <div className="flex items-center gap-3">
-                                    <div className="h-10 w-10 rounded-full bg-emerald-500/10 flex items-center justify-center text-emerald-500">
-                                      <Database size={20} />
-                                    </div>
-                                    <div>
-                                      <p className="text-sm font-bold text-[#cccccc]">Platform Keys Configured</p>
-                                      <p className="text-xs text-[#858585]">Your Supabase and Vercel integrations are active.</p>
-                                    </div>
-                                  </div>
-                                  <CheckCircle2 size={24} className="text-emerald-500" />
-                                </div>
-                              )}
+                              </div>
                             </div>
                           </div>
                         </motion.div>
