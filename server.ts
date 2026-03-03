@@ -21,8 +21,7 @@ const requiredEnvVars = [
   'GITHUB_CLIENT_ID',
   'GITHUB_CLIENT_SECRET',
   'ENCRYPTION_KEY',
-  'APP_URL',
-  'VERCEL_DEPLOY_HOOK'
+  'APP_URL'
 ];
 
 const missingEnvVars = requiredEnvVars.filter(v => !process.env[v]);
@@ -347,6 +346,145 @@ app.get('/api/github/login', authenticateToken, (req: any, res: any) => {
   res.redirect(`https://github.com/login/oauth/authorize?${params.toString()}`);
 });
 
+// --- Netlify OAuth Flow ---
+
+// 8. Netlify: Start OAuth
+app.get('/api/netlify/login', authenticateToken, (req: any, res: any) => {
+  if (!process.env.NETLIFY_CLIENT_ID) {
+    return res.status(500).json({ error: 'Missing NETLIFY_CLIENT_ID in environment' });
+  }
+
+  const state = crypto.randomBytes(16).toString('hex');
+  res.cookie('netlify_oauth_state', state, { httpOnly: true, secure: true, sameSite: 'none' });
+
+  const params = new URLSearchParams({
+    client_id: process.env.NETLIFY_CLIENT_ID!,
+    redirect_uri: `${process.env.APP_URL}/api/netlify/callback`,
+    response_type: 'code',
+    state: state
+  });
+
+  res.redirect(`https://app.netlify.com/authorize?${params.toString()}`);
+});
+
+// 9. Netlify: OAuth Callback
+app.get('/api/netlify/callback', async (req: any, res: any) => {
+  const { code, state } = req.query;
+  const savedState = req.cookies.netlify_oauth_state;
+
+  if (!state || state !== savedState) {
+    return res.status(400).json({ error: 'Invalid state (CSRF protection)' });
+  }
+
+  try {
+    const tokenResponse = await fetch('https://api.netlify.com/oauth/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Accept': 'application/json'
+      },
+      body: new URLSearchParams({
+        client_id: process.env.NETLIFY_CLIENT_ID!,
+        client_secret: process.env.NETLIFY_CLIENT_SECRET!,
+        grant_type: 'authorization_code',
+        code: code as string,
+        redirect_uri: `${process.env.APP_URL}/api/netlify/callback`
+      })
+    });
+
+    const tokenData = await tokenResponse.json();
+    if (tokenData.error) throw new Error(tokenData.error_description || tokenData.error);
+
+    const sessionToken = req.cookies.sb_access_token;
+    if (!sessionToken) throw new Error('No session found');
+    
+    const jwtSecret = process.env.JWT_SECRET;
+    const decoded: any = jwt.verify(sessionToken, jwtSecret!);
+    const userId = decoded.sub;
+
+    // Store encrypted tokens
+    const { error } = await supabase
+      .from('user_netlify_tokens')
+      .upsert({
+        user_id: userId,
+        access_token: encrypt(tokenData.access_token),
+        refresh_token: tokenData.refresh_token ? encrypt(tokenData.refresh_token) : null,
+        created_at: new Date().toISOString()
+      }, { onConflict: 'user_id' });
+
+    if (error) throw error;
+
+    res.send(`
+      <html>
+        <body>
+          <script>
+            window.opener.postMessage({ type: 'NETLIFY_AUTH_SUCCESS' }, '*');
+            window.close();
+          </script>
+          <p>Netlify connected! Closing window...</p>
+        </body>
+      </html>
+    `);
+  } catch (error: any) {
+    console.error('Netlify OAuth error:', error);
+    res.status(500).send(`Auth failed: ${error.message}`);
+  }
+});
+
+// 10. Netlify: List Sites
+app.get('/api/netlify/sites', authenticateToken, async (req: any, res: any) => {
+  try {
+    const { data, error } = await supabase
+      .from('user_netlify_tokens')
+      .select('access_token')
+      .eq('user_id', req.user.sub)
+      .single();
+
+    if (error || !data) return res.status(400).json({ error: 'Netlify not connected' });
+
+    const accessToken = decrypt(data.access_token);
+    const response = await fetch('https://api.netlify.com/api/v1/sites', {
+      headers: { 'Authorization': `Bearer ${accessToken}` }
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch Netlify sites');
+    const sites = await response.json();
+    res.json(sites);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 11. Netlify: Create Build Hook
+app.post('/api/netlify/hooks', authenticateToken, async (req: any, res: any) => {
+  const { siteId, branch = 'main' } = req.body;
+  try {
+    const { data, error } = await supabase
+      .from('user_netlify_tokens')
+      .select('access_token')
+      .eq('user_id', req.user.sub)
+      .single();
+
+    if (error || !data) return res.status(400).json({ error: 'Netlify not connected' });
+
+    const accessToken = decrypt(data.access_token);
+    const response = await fetch(`https://api.netlify.com/api/v1/sites/${siteId}/build_hooks`, {
+      method: 'POST',
+      headers: { 
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ title: 'kyn Builder Hook', branch })
+    });
+
+    if (!response.ok) throw new Error('Failed to create Netlify build hook');
+    const hook = await response.json();
+    res.json(hook);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // 7. GitHub: OAuth Callback
 app.get('/api/github/callback', async (req: any, res: any) => {
   const { code, state } = req.query;
@@ -459,8 +597,15 @@ app.get('/api/users/status', authenticateToken, async (req: any, res: any) => {
       .eq('user_id', req.user.sub)
       .single();
 
+    const { data: netlify } = await supabase
+      .from('user_netlify_tokens')
+      .select('id')
+      .eq('user_id', req.user.sub)
+      .single();
+
     res.json({
       githubConnected: !!github,
+      netlifyConnected: !!netlify,
       keysConfigured: !!keys,
       encryptedData: keys?.encrypted_data || null
     });

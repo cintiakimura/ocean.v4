@@ -29,8 +29,8 @@ export default function AuthPage({ mode }: AuthPageProps) {
       
       alert('Magic link sent to your email!');
       // In a real app, we'd wait for the user to click the link.
-      // For this demo, we'll just navigate to builder after a short delay.
-      setTimeout(() => navigate('/builder'), 2000);
+      // For this demo, we'll just navigate to onboarding after a short delay.
+      setTimeout(() => navigate('/onboarding'), 2000);
     } catch (error) {
       alert('Error: ' + (error instanceof Error ? error.message : 'Unknown error'));
     } finally {

@@ -26,7 +26,11 @@ This template uses a two-tier secret management system:
     *   Create an OAuth App in GitHub Developer Settings.
     *   Set `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` in `.env`.
     *   Callback URL: `https://your-app.run.app/api/github/callback`.
-3.  **Security**:
+3.  **Netlify OAuth (Platform App)**:
+    *   Create an OAuth App in Netlify Developer Settings.
+    *   Set `NETLIFY_CLIENT_ID` and `NETLIFY_CLIENT_SECRET` in `.env`.
+    *   Callback URL: `https://your-app.run.app/api/netlify/callback`.
+4.  **Security**:
     *   Generate a 32-byte hex key for `ENCRYPTION_KEY`.
     *   Set `APP_URL` to your deployment origin.
 
@@ -34,12 +38,13 @@ This template uses a two-tier secret management system:
 
 ## 🛠️ User Setup Guide (For Developers)
 
-1.  **Connect GitHub**: Click "Connect GitHub" in the Onboarding tab. This is a one-time authorization.
-2.  **Configure Secrets**: Go to the **Secrets** tab and provide your own:
+1.  **Connect GitHub**: Click "Connect GitHub" in the Onboarding flow. This is a one-time authorization.
+2.  **Connect Netlify**: Connect via OAuth or provide a PAT. Select your site to auto-create a build hook.
+3.  **Configure Secrets**: Provide your own:
     *   **Supabase**: Project URL, Anon Key, Service Role, JWT Secret.
     *   **AI**: Grok API Key.
-    *   **Vercel**: Deploy Hook URL.
-3.  **Build**: Once secrets are saved, you can use the Wizard to generate and deploy apps.
+    *   **Vercel/Netlify**: Deploy Hook URL (auto-filled if using Netlify step).
+4.  **Build**: Once setup is complete, you can use the Wizard to generate and deploy apps.
 
 ---
 
@@ -65,6 +70,16 @@ create table user_github_tokens (
   access_token text not null,
   refresh_token text,
   expires_at timestamptz,
+  created_at timestamptz default now(),
+  unique(user_id)
+);
+
+-- User Netlify Tokens
+create table user_netlify_tokens (
+  id uuid primary key default uuid_generate_v4(),
+  user_id uuid references auth.users(id) not null,
+  access_token text not null,
+  refresh_token text,
   created_at timestamptz default now(),
   unique(user_id)
 );

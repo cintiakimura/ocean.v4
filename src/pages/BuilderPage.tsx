@@ -66,28 +66,11 @@ export default function BuilderPage() {
   const [generatedApp, setGeneratedApp] = useState<GeneratedApp | null>(null);
   const [activeFile, setActiveFile] = useState<FileContent | null>(null);
   const [sidebarExpanded, setSidebarExpanded] = useState(true);
-  const [activeTab, setActiveTab] = useState<'wizard' | 'explorer' | 'onboarding'>('wizard');
+  const [activeTab, setActiveTab] = useState<'wizard' | 'explorer'>('wizard');
   const [terminalOutput, setTerminalOutput] = useState<string[]>(['Welcome to kyn Builder v1.0.0', 'Ready to build your next SaaS...']);
   
-  // Onboarding State
-  const [onboardingStep, setOnboardingStep] = useState(1);
-  const [userStatus, setUserStatus] = useState({
-    githubConnected: false,
-    keysConfigured: false
-  });
-  const [secrets, setSecrets] = useState({
-    supabaseUrl: '',
-    supabaseAnonKey: '',
-    supabaseServiceKey: '',
-    supabaseJwtSecret: '',
-    grokKey: '',
-    vercelDeployHook: '',
-    encryptionKey: ''
-  });
-  const [showSecrets, setShowSecrets] = useState<Record<string, boolean>>({});
-  const [isSavingSecrets, setIsSavingSecrets] = useState(false);
-  const [secretsMessage, setSecretsMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
-  const [isEditingKeys, setIsEditingKeys] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const navigate = useNavigate();
 
   // Check user status on load
   React.useEffect(() => {
@@ -95,37 +78,16 @@ export default function BuilderPage() {
       try {
         const res = await fetch('/api/users/status');
         const data = await res.json();
-        setUserStatus({
-          githubConnected: data.githubConnected,
-          keysConfigured: data.keysConfigured
-        });
         
-        if (!data.githubConnected) {
-          setOnboardingStep(1);
-          setActiveTab('onboarding');
-        } else if (!data.keysConfigured) {
-          setOnboardingStep(2);
-          setActiveTab('onboarding');
-        } else {
-          setOnboardingStep(3);
+        if (!data.githubConnected || !data.keysConfigured) {
+          navigate('/onboarding');
         }
       } catch (e) {
         console.error('Failed to check user status');
       }
     };
     checkStatus();
-
-    // Listen for GitHub success
-    const handleMessage = (event: MessageEvent) => {
-      if (event.data?.type === 'GITHUB_AUTH_SUCCESS') {
-        setUserStatus(prev => ({ ...prev, githubConnected: true }));
-        setOnboardingStep(2);
-        setTerminalOutput(prev => [...prev, '> GitHub connected successfully!']);
-      }
-    };
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
-  }, []);
+  }, [navigate]);
 
   const handleInputChange = (field: keyof AppSpecs, value: string) => {
     setSpecs(prev => ({ ...prev, [field]: value }));
@@ -182,74 +144,6 @@ export default function BuilderPage() {
       setTerminalOutput(prev => [...prev, `> Successfully uploaded ${file.name}.`]);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }, 1500);
-  };
-
-  const generateEncryptionKey = () => {
-    const key = CryptoJS.lib.WordArray.random(32).toString(CryptoJS.enc.Hex);
-    setSecrets(prev => ({ ...prev, encryptionKey: key }));
-  };
-
-  const handleSaveSecrets = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsSavingSecrets(true);
-    setSecretsMessage(null);
-
-    // Validation
-    if (secrets.supabaseUrl && !secrets.supabaseUrl.startsWith('https://') || !secrets.supabaseUrl.includes('.supabase.co')) {
-      setSecretsMessage({ type: 'error', text: 'Invalid Supabase URL. Must start with https:// and end with .supabase.co' });
-      setIsSavingSecrets(false);
-      return;
-    }
-
-    const jwtFields = ['supabaseAnonKey', 'supabaseServiceKey', 'supabaseJwtSecret'];
-    for (const field of jwtFields) {
-      const val = (secrets as any)[field];
-      if (val && !val.startsWith('eyJ')) {
-        setSecretsMessage({ type: 'error', text: `Invalid ${field}. Keys usually start with "eyJ..."` });
-        setIsSavingSecrets(false);
-        return;
-      }
-    }
-
-    let finalEncryptionKey = secrets.encryptionKey;
-    if (!finalEncryptionKey) {
-      finalEncryptionKey = CryptoJS.lib.WordArray.random(32).toString(CryptoJS.enc.Hex);
-      setSecrets(prev => ({ ...prev, encryptionKey: finalEncryptionKey }));
-    }
-
-    try {
-      // Encrypt data
-      const dataToEncrypt = JSON.stringify(secrets);
-      const encrypted = CryptoJS.AES.encrypt(dataToEncrypt, finalEncryptionKey).toString();
-
-      const res = await fetch('/api/onboarding/keys', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          encrypted_data: encrypted,
-          user_encryption_key: finalEncryptionKey
-        })
-      });
-
-      if (!res.ok) throw new Error('Failed to save keys');
-      
-      setSecretsMessage({ type: 'success', text: 'Platform keys saved and encrypted successfully!' });
-      setUserStatus(prev => ({ ...prev, keysConfigured: true }));
-      setIsEditingKeys(false);
-      setTerminalOutput(prev => [...prev, '> Platform keys saved and encrypted.']);
-    } catch (error: any) {
-      setSecretsMessage({ type: 'error', text: error.message });
-    } finally {
-      setIsGenerating(false);
-      setIsSavingSecrets(false);
-    }
-  };
-
-  const handleConnectGithub = () => {
-    const width = 600, height = 700;
-    const left = (window.innerWidth - width) / 2;
-    const top = (window.innerHeight - height) / 2;
-    window.open('/api/github/login', 'github_auth', `width=${width},height=${height},top=${top},left=${left}`);
   };
 
   // Map generated files for Sandpack
@@ -349,12 +243,6 @@ export default function BuilderPage() {
           >
             <Files size={24} />
           </button>
-          <button 
-            onClick={() => { setActiveTab('onboarding'); setSidebarExpanded(true); }}
-            className={cn("p-2 transition-colors hover:text-[#cccccc]", activeTab === 'onboarding' && "text-emerald-500 border-l-2 border-emerald-500")}
-          >
-            <Key size={24} />
-          </button>
           <button className="p-2 transition-colors hover:text-[#cccccc]">
             <Search size={24} />
           </button>
@@ -378,7 +266,7 @@ export default function BuilderPage() {
               <Panel defaultSize={15} minSize={10} maxSize={30}>
                 <div className="flex h-full flex-col bg-[#252526]">
                   <div className="flex h-9 items-center justify-between px-4 text-[11px] font-bold uppercase tracking-wider text-[#858585]">
-                    <span>{activeTab === 'wizard' ? 'App Wizard' : activeTab === 'explorer' ? 'Explorer' : 'Onboarding'}</span>
+                    <span>{activeTab === 'wizard' ? 'App Wizard' : 'Explorer'}</span>
                   </div>
                   
                   <div className="flex-1 overflow-y-auto custom-scrollbar">
@@ -402,7 +290,7 @@ export default function BuilderPage() {
                           </button>
                         ))}
                       </div>
-                    ) : activeTab === 'explorer' ? (
+                    ) : (
                       <div className="p-2">
                         {generatedApp ? (
                           <div className="space-y-1">
@@ -428,52 +316,6 @@ export default function BuilderPage() {
                           </div>
                         )}
                       </div>
-                    ) : (
-                      <div className="p-4 space-y-6">
-                        <div className="flex items-center gap-2 text-emerald-500 font-bold uppercase tracking-wider">
-                          <Key size={14} />
-                          <span>Onboarding</span>
-                        </div>
-                        
-                        {/* Step Progress */}
-                        <div className="space-y-4">
-                          <div className="flex items-center gap-3">
-                            <div className={cn(
-                              "flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold",
-                              onboardingStep >= 1 ? "bg-emerald-500 text-black" : "bg-white/10 text-[#858585]"
-                            )}>1</div>
-                            <span className={cn("text-[10px] font-bold uppercase", onboardingStep >= 1 ? "text-[#cccccc]" : "text-[#858585]")}>GitHub</span>
-                            {userStatus.githubConnected && <CheckCircle2 size={12} className="ml-auto text-emerald-500" />}
-                          </div>
-                          <div className="flex items-center gap-3">
-                            <div className={cn(
-                              "flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold",
-                              onboardingStep >= 2 ? "bg-emerald-500 text-black" : "bg-white/10 text-[#858585]"
-                            )}>2</div>
-                            <span className={cn("text-[10px] font-bold uppercase", onboardingStep >= 2 ? "text-[#cccccc]" : "text-[#858585]")}>Vercel Hook</span>
-                            {secrets.vercelDeployHook && userStatus.keysConfigured && <CheckCircle2 size={12} className="ml-auto text-emerald-500" />}
-                          </div>
-                          <div className="flex items-center gap-3">
-                            <div className={cn(
-                              "flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold",
-                              onboardingStep >= 3 ? "bg-emerald-500 text-black" : "bg-white/10 text-[#858585]"
-                            )}>3</div>
-                            <span className={cn("text-[10px] font-bold uppercase", onboardingStep >= 3 ? "text-[#cccccc]" : "text-[#858585]")}>Platform Keys</span>
-                            {userStatus.keysConfigured && <CheckCircle2 size={12} className="ml-auto text-emerald-500" />}
-                          </div>
-                        </div>
-
-                        <div className="h-px bg-white/5" />
-                        <div className="space-y-2">
-                          <div className="flex items-center gap-2 text-amber-500">
-                            <ShieldAlert size={14} />
-                            <span className="font-bold">Security</span>
-                          </div>
-                          <p className="text-[10px]">
-                            Your keys are encrypted locally before storage. We never see your raw secrets.
-                          </p>
-                        </div>
-                      </div>
                     )}
                   </div>
                 </div>
@@ -494,18 +336,13 @@ export default function BuilderPage() {
                         <Wand2 size={14} className="mr-2 text-emerald-500" />
                         <span>Wizard.config</span>
                       </div>
-                    ) : activeTab === 'explorer' ? (
+                    ) : (
                       activeFile && (
                         <div className="flex h-full items-center border-t-2 border-emerald-500 bg-[#1e1e1e] px-4 text-xs">
                           <FileCode size={14} className="mr-2 text-emerald-500" />
                           <span>{activeFile.path.split('/').pop()}</span>
                         </div>
                       )
-                    ) : (
-                      <div className="flex h-full items-center border-t-2 border-emerald-500 bg-[#1e1e1e] px-4 text-xs">
-                        <Key size={14} className="mr-2 text-emerald-500" />
-                        <span>Onboarding.env</span>
-                      </div>
                     )}
                   </div>
 
@@ -587,7 +424,7 @@ export default function BuilderPage() {
                             ))}
                           </div>
                         </motion.div>
-                      ) : activeTab === 'explorer' ? (
+                      ) : (
                         <motion.div 
                           key="editor"
                           initial={{ opacity: 0 }}
@@ -609,198 +446,6 @@ export default function BuilderPage() {
                               readOnly: true,
                             }}
                           />
-                        </motion.div>
-                      ) : (
-                        <motion.div
-                          key="onboarding"
-                          initial={{ opacity: 0, x: 20 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          className="h-full w-full p-8 max-w-3xl mx-auto overflow-y-auto custom-scrollbar"
-                        >
-                          <div className="mb-8">
-                            <h2 className="text-2xl font-bold text-[#cccccc] mb-2">Onboarding Wizard</h2>
-                            <p className="text-sm text-[#858585]">Follow the steps below to configure your development environment.</p>
-                          </div>
-
-                          <div className="space-y-12 pb-20">
-                            {/* Step 1: GitHub */}
-                            <div className={cn("space-y-4 transition-opacity", onboardingStep !== 1 && "opacity-40 pointer-events-none")}>
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2 text-emerald-500 font-bold uppercase tracking-wider text-xs">
-                                  <Github size={14} />
-                                  <span>Step 1: Connect GitHub</span>
-                                </div>
-                                {userStatus.githubConnected && <CheckCircle2 size={16} className="text-emerald-500" />}
-                              </div>
-                              
-                              <div className="rounded-lg border border-white/5 bg-[#252526] p-6">
-                                <p className="text-sm text-[#cccccc] mb-4">Link your GitHub account to enable one-click repository creation and management.</p>
-                                <button
-                                  onClick={handleConnectGithub}
-                                  disabled={userStatus.githubConnected}
-                                  className={cn(
-                                    "inline-flex items-center gap-2 rounded-md px-6 py-2.5 text-sm font-bold transition-all shadow-lg",
-                                    userStatus.githubConnected ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20" : "bg-[#24292e] text-white hover:bg-[#2c3137]"
-                                  )}
-                                >
-                                  <Github size={18} />
-                                  {userStatus.githubConnected ? 'GitHub Connected' : 'Connect GitHub Account'}
-                                </button>
-                              </div>
-                            </div>
-
-                            {/* Step 2: Vercel Deploy Hook */}
-                            <div className={cn("space-y-4 transition-opacity", onboardingStep !== 2 && "opacity-40 pointer-events-none")}>
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2 text-emerald-500 font-bold uppercase tracking-wider text-xs">
-                                  <ExternalLink size={14} />
-                                  <span>Step 2: Vercel Deploy Hook</span>
-                                </div>
-                              </div>
-                              
-                              <div className="rounded-lg border border-white/5 bg-[#252526] p-6 space-y-4">
-                                <p className="text-sm text-[#cccccc]">Provide your Vercel Deploy Hook URL to enable automatic deployments.</p>
-                                <SecretInput 
-                                  label="Vercel Deploy Hook URL"
-                                  value={secrets.vercelDeployHook}
-                                  onChange={(v) => setSecrets(p => ({ ...p, vercelDeployHook: v }))}
-                                  placeholder="https://api.vercel.com/v1/integrations/deploy/..."
-                                  tooltip="Find this in Vercel → Settings → Git → Deploy Hooks"
-                                />
-                                <button
-                                  onClick={() => setOnboardingStep(3)}
-                                  className="inline-flex items-center gap-2 rounded-md bg-emerald-500 px-6 py-2.5 text-sm font-bold text-black hover:bg-emerald-400 transition-all shadow-lg"
-                                >
-                                  Next Step
-                                  <ChevronRight size={18} />
-                                </button>
-                              </div>
-                            </div>
-
-                            {/* Step 3: Platform Keys */}
-                            <div className={cn("space-y-4 transition-opacity", onboardingStep !== 3 && "opacity-40 pointer-events-none")}>
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2 text-emerald-500 font-bold uppercase tracking-wider text-xs">
-                                  <Database size={14} />
-                                  <span>Step 3: Platform Keys</span>
-                                </div>
-                              </div>
-
-                              <div className="rounded-lg border border-white/5 bg-[#252526] p-6">
-                                <form onSubmit={handleSaveSecrets} className="space-y-8">
-                                  {/* Supabase Section */}
-                                  <div className="space-y-4">
-                                    <div className="flex items-center gap-2 text-[#858585] font-bold uppercase tracking-wider text-[10px]">
-                                      <Database size={12} />
-                                      <span>Supabase Configuration</span>
-                                    </div>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                      <SecretInput 
-                                        label="Supabase Project URL"
-                                        value={secrets.supabaseUrl}
-                                        onChange={(v) => setSecrets(p => ({ ...p, supabaseUrl: v }))}
-                                        placeholder="https://your-project.supabase.co"
-                                        tooltip="Find this in Supabase Dashboard → Settings → API → Project URL"
-                                      />
-                                      <SecretInput 
-                                        label="Supabase Service Role Key"
-                                        value={secrets.supabaseServiceKey}
-                                        onChange={(v) => setSecrets(p => ({ ...p, supabaseServiceKey: v }))}
-                                        placeholder="eyJ..."
-                                        type="password"
-                                        show={showSecrets.supabaseServiceKey}
-                                        onToggle={() => setShowSecrets(p => ({ ...p, supabaseServiceKey: !p.supabaseServiceKey }))}
-                                        tooltip="Find this in Supabase Dashboard → Settings → API → service_role secret"
-                                      />
-                                    </div>
-                                  </div>
-
-                                  {/* AI Services Section */}
-                                  <div className="space-y-4">
-                                    <div className="flex items-center gap-2 text-[#858585] font-bold uppercase tracking-wider text-[10px]">
-                                      <Wand2 size={12} />
-                                      <span>AI Services</span>
-                                    </div>
-                                    <SecretInput 
-                                      label="Grok API Key"
-                                      value={secrets.grokKey}
-                                      onChange={(v) => setSecrets(p => ({ ...p, grokKey: v }))}
-                                      placeholder="xai-..."
-                                      type="password"
-                                      show={showSecrets.grokKey}
-                                      onToggle={() => setShowSecrets(p => ({ ...p, grokKey: !p.grokKey }))}
-                                      tooltip="Find this in console.x.ai"
-                                    />
-                                  </div>
-
-                                  {/* Encryption Key Section */}
-                                  <div className="space-y-4">
-                                    <div className="flex gap-2">
-                                      <div className="flex-1">
-                                        <SecretInput 
-                                          label="Master Encryption Key"
-                                          value={secrets.encryptionKey}
-                                          onChange={(v) => setSecrets(p => ({ ...p, encryptionKey: v }))}
-                                          placeholder="32-byte hex string"
-                                          type="password"
-                                          show={showSecrets.encryptionKey}
-                                          onToggle={() => setShowSecrets(p => ({ ...p, encryptionKey: !p.encryptionKey }))}
-                                          tooltip="Used to encrypt your secrets locally before saving to DB"
-                                        />
-                                      </div>
-                                      <button
-                                        type="button"
-                                        onClick={generateEncryptionKey}
-                                        className="mt-6 flex h-10 items-center gap-2 rounded-md border border-white/10 bg-white/5 px-4 text-xs hover:bg-white/10 transition-colors"
-                                      >
-                                        <RefreshCw size={14} />
-                                        <span>Generate</span>
-                                      </button>
-                                    </div>
-                                  </div>
-
-                                  {secretsMessage && (
-                                    <div className={cn(
-                                      "p-4 rounded-md text-xs flex items-center gap-3",
-                                      secretsMessage.type === 'success' ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20" : "bg-red-500/10 text-red-500 border border-red-500/20"
-                                    )}>
-                                      {secretsMessage.type === 'success' ? <CheckCircle2 size={16} /> : <ShieldAlert size={16} />}
-                                      <span>{secretsMessage.text}</span>
-                                    </div>
-                                  )}
-
-                                  <div className="flex gap-3">
-                                    {isEditingKeys && (
-                                      <button
-                                        type="button"
-                                        onClick={() => setIsEditingKeys(false)}
-                                        className="flex-1 rounded-md border border-white/10 bg-white/5 py-3 text-sm font-bold text-[#cccccc] hover:bg-white/10 transition-all"
-                                      >
-                                        Cancel
-                                      </button>
-                                    )}
-                                    <button
-                                      type="submit"
-                                      disabled={isSavingSecrets}
-                                      className="flex-[2] flex items-center justify-center gap-2 rounded-md bg-emerald-500 py-3 text-sm font-bold text-black hover:bg-emerald-400 transition-all shadow-lg shadow-emerald-500/20 disabled:opacity-50"
-                                    >
-                                      {isSavingSecrets ? (
-                                        <>
-                                          <Loader2 size={18} className="animate-spin" />
-                                          <span>Saving...</span>
-                                        </>
-                                      ) : (
-                                        <>
-                                          <CheckCircle2 size={18} />
-                                          <span>Complete Setup</span>
-                                        </>
-                                      )}
-                                    </button>
-                                  </div>
-                                </form>
-                              </div>
-                            </div>
-                          </div>
                         </motion.div>
                       )}
                     </AnimatePresence>
